@@ -1,0 +1,144 @@
+---
+title: predict the manner of people who wears the fitbit by building a model
+author: "Rick"
+date: "October 25, 2015"
+output: html_document
+---
+
+## Executive summary: 
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively.  One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, our goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. And we build a model to use data of different type to predict the manner in which they are doing the activity.
+
+
+
+## Data Processing and Analysis
+
+At the first place, download the data and do some data cleaning and load package:
+```{r message=FALSE, warning=FALSE}
+library(caret)
+require(cars)
+require(car)
+require(RANN)
+library(rpart.plot)
+library(randomForest)
+if(!file.exists("data")){
+  dir.create("data")
+}
+
+file_name<-"./data/training.csv"
+
+if(!file.exists(file_name)){
+  fileUrl<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+  download.file(fileUrl,destfile=file_name, method="auto")
+  list.files("./data")
+}
+
+file_name<-"./data/test.csv"
+
+if(!file.exists(file_name)){
+  fileUrl<-"https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+  download.file(fileUrl,destfile=file_name, method="auto")
+  list.files("./data")
+}
+test<-read.csv("./data/test.csv",header=TRUE)
+train<-read.csv("./data/training.csv",header=TRUE)
+head(train[c(1:5,160),1:6])
+dim(train)
+```
+
+First, we do some check about the numeric varaibles:
+
+```{r}
+nume_var_index<-match(names(train)[sapply(train,class) %in% c("numeric","integer")],names(train))
+
+test1<-sapply(train[,nume_var_index],function(i) sum(is.na(i)))
+levels(as.factor(test1))
+```
+
+We can see there exists some numeric variables that have just a tiny part of non-NA value. Hence, we delete these values.
+
+```{r}
+dele<-nume_var_index[test1!=0]
+train<-train[,-dele]
+dim(train)
+```
+
+Then, let us see how to remove zero covariates:
+
+```{r}
+nsv<-nearZeroVar(train,saveMetrics = TRUE)
+train<-train[,nsv[,4]==FALSE]
+dim(train)
+names(train)
+```
+
+Also, we found that the first 6 variables make no help to building the model obviously, so omit them.
+
+```{r}
+train<-train[,-c(1:6)]
+dim(train)
+```
+
+Now applying the crossvalidation strategy, we make a subtraining set and a subtest set.
+
+```{r}
+subsamples <- createDataPartition(y=train$classe, p=0.75, list=FALSE)
+subTraining <- train[subsamples, ] 
+subTesting <- train[-subsamples, ]
+```
+
+
+At the same time, do not forget to do the same thing to final test set.
+Then, let us do some preprocess about data:
+```{r message=FALSE, warning=FALSE,}
+test<-cbind(test[,names(test) %in% names(train)],test[,160])
+dim(test)
+names(test)[53]<-"problem_id"
+names(test)
+```
+
+[Model 1]Now let us choose the linear discriminant analysis to build the model.
+
+```{r message=FALSE, warning=FALSE,}
+fit1<-train(classe ~ ., data = subTraining, method="lda")
+print(fit1,digits=3)
+```
+
+Then let us check the out of sample error
+```{r message=FALSE, warning=FALSE,}
+check <- predict(fit1, subTesting)
+confusionMatrix(check, subTesting$classe)
+```
+
+The error is quite big. Hence let us try another model: random forest model.
+
+[Model 2]
+```{r message=FALSE, warning=FALSE,}
+set.seed(12345)
+fit2<-randomForest(classe~.,data=subTraining,ntree=100, importance=TRUE)
+print(fit2,digits=3)
+```
+The accuracy seems quite good. Let us do the crossvalidation.
+```{r message=FALSE, warning=FALSE,}
+check <- predict(fit2, subTesting)
+confusionMatrix(check, subTesting$classe)
+```
+
+The accuracy 0.975 is much larger than 0.68. Hence we use the model 2 produced by random forest. The expected out of sample error is 2.5%.
+
+Finally, we
+
+```{r}
+
+answers <- predict(fit2, test)
+answers
+pml_write_files = function(x){
+  n = length(x)
+  for(i in 1:n){
+    filename = paste0("problem_id_",i,".txt")
+    write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+  }
+}
+
+pml_write_files(answers)
+```
+
